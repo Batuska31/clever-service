@@ -148,6 +148,24 @@ export default function AIChatPage() {
     const recognitionRef = React.useRef<any>(null)
     const isRecordingRef = React.useRef(false)
     const stopRequestedRef = React.useRef(false)
+    const micTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+
+    // Reset microphone timeout (6 seconds)
+    function resetMicTimeout() {
+        if (micTimeoutRef.current) clearTimeout(micTimeoutRef.current)
+        micTimeoutRef.current = setTimeout(() => {
+            if (isRecordingRef.current) {
+                stopListening()
+                setVoiceOpen(false)
+                setHandsfree(false)
+                showToast("Sessizlik algılandı, mikrofon kapatıldı.")
+            }
+        }, 6000)
+    }
+
+    function clearMicTimeout() {
+        if (micTimeoutRef.current) clearTimeout(micTimeoutRef.current)
+    }
 
     const [particles] = React.useState(() => {
         const count = isBrowser && window.innerWidth < 500 ? 10 : 20
@@ -257,7 +275,10 @@ export default function AIChatPage() {
         const rec = getRecognition()
         if (!rec) { setLastError("Tarayıcı konuşma tanımayı desteklemiyor."); setVoiceState("error"); return }
         recognitionRef.current = rec; isRecordingRef.current = true; setVoiceText(""); setVoiceState("listening")
+        resetMicTimeout() // Start timeout on listen
+        
         rec.onresult = (event: any) => {
+            resetMicTimeout() // Reset timeout whenever voice is heard
             try {
                 let finalText = "", interimText = ""
                 for (let i = 0; i < event.results.length; i++) {
@@ -266,15 +287,20 @@ export default function AIChatPage() {
                 }
                 const display = (finalText + interimText).trim()
                 if (display) setVoiceText(display)
-                if (finalText.trim() && autoSendOnStop) { stopListening(); setVoiceState("thinking"); setTimeout(() => sendMessage(finalText.trim()), 300) }
+                if (finalText.trim() && autoSendOnStop) { 
+                    clearMicTimeout()
+                    stopListening()
+                    setVoiceState("thinking")
+                    setTimeout(() => sendMessage(finalText.trim()), 300) 
+                }
             } catch (e) { console.log("onresult error:", e) }
         }
-        rec.onerror = (e: any) => { if (e.error !== "no-speech") { setLastError("Mikrofon hatası."); setVoiceState("error") }; isRecordingRef.current = false }
-        rec.onend = () => { isRecordingRef.current = false; if (handsfree && !stopRequestedRef.current && voiceOpen) setTimeout(() => startListening(), 350) }
-        try { rec.start() } catch { setLastError("Mikrofon başlatılamadı."); setVoiceState("error") }
+        rec.onerror = (e: any) => { if (e.error !== "no-speech") { setLastError("Mikrofon hatası."); setVoiceState("error") }; clearMicTimeout(); isRecordingRef.current = false }
+        rec.onend = () => { isRecordingRef.current = false; if (handsfree && !stopRequestedRef.current && voiceOpen) { setTimeout(() => startListening(), 350) } else { clearMicTimeout() } }
+        try { rec.start() } catch { setLastError("Mikrofon başlatılamadı."); setVoiceState("error"); clearMicTimeout() }
     }
 
-    function stopListening() { stopRequestedRef.current = true; try { recognitionRef.current?.stop?.() } catch { }; isRecordingRef.current = false; if (voiceState === "listening") setVoiceState("done") }
+    function stopListening() { clearMicTimeout(); stopRequestedRef.current = true; try { recognitionRef.current?.stop?.() } catch { }; isRecordingRef.current = false; if (voiceState === "listening") setVoiceState("done") }
 
     React.useEffect(() => {
         if (!voiceOpen) { stopListening(); stopSpeak(); setVoiceMenuOpen(false); return }
@@ -322,8 +348,8 @@ export default function AIChatPage() {
                             <line x1="3" x2="21" y1="6" y2="6" /><line x1="3" x2="21" y1="12" y2="12" /><line x1="3" x2="21" y1="18" y2="18" />
                         </svg>
                     </motion.button>
-                    <motion.div className="patron-logo-orb" animate={{ rotate: 360 }} transition={{ duration: 30, repeat: Infinity, ease: "linear" }}>
-                        <div className="patron-logo-inner">P</div>
+                    <motion.div className="patron-logo-orb" animate={{ rotate: 360 }} transition={{ duration: 30, repeat: Infinity, ease: "linear" }} style={{ overflow: "hidden", background: "white", padding: 2 }}>
+                        <img src="/eagle-logo.png" alt="Eagle" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                     </motion.div>
                     <div>
                         <div className="patron-title">Patron AI</div>
@@ -365,7 +391,7 @@ export default function AIChatPage() {
                 {showQuickPrompts && (
                     <motion.div className="quick-prompts" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
                         {QUICK_PROMPTS.map((p, i) => (
-                            <motion.button key={i} className="quick-prompt-card" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={() => sendMessage(p.q)}>
+                            <motion.button key={i} className="quick-prompt-card" whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} onClick={() => sendMessage(p.q)}>
                                 <span className="quick-prompt-icon">{p.icon}</span>
                                 <span className="quick-prompt-title">{p.title}</span>
                                 <span className="quick-prompt-desc">{p.desc}</span>
@@ -456,7 +482,7 @@ export default function AIChatPage() {
                 {sidebarOpen && (
                     <>
                         <motion.div className="sidebar-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSidebarOpen(false)} />
-                        <motion.div className="sidebar" initial={{ x: -320 }} animate={{ x: 0 }} exit={{ x: -320 }} transition={{ type: "spring", damping: 30, stiffness: 350 }}>
+                        <motion.div className="sidebar" initial={{ x: -320 }} animate={{ x: 0 }} exit={{ x: -320 }} transition={{ type: "spring", damping: 25, stiffness: 400 }}>
                             <div className="sidebar-header">
                                 <span className="sidebar-title">Sohbet Geçmişi</span>
                                 <motion.button className="patron-header-btn" whileTap={{ scale: 0.9 }} onClick={() => setSidebarOpen(false)} style={{ width: 32, height: 32 }}>
@@ -510,9 +536,13 @@ function ChatBubble({ msg, onCopy }: { msg: Msg; onCopy: (t: string) => void }) 
     return (
         <motion.div
             className={`patron-bubble ${isBot ? "patron-bubble-bot" : "patron-bubble-user"}`}
-            layout initial={{ opacity: 0, y: 12, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.25 }}
+            layout initial={{ opacity: 0, y: 15, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ type: "spring", stiffness: 450, damping: 28 }}
         >
-            {isBot && <div className="patron-bot-avatar"><span>P</span></div>}
+            {isBot && (
+                <div className="patron-bot-avatar" style={{ overflow: "hidden", background: "white", padding: 2 }}>
+                    <img src="/eagle-logo.png" alt="Eagle" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                </div>
+            )}
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ wordBreak: "break-word" as const }}>
                     {isBot ? <MarkdownText text={displayed} /> : msg.content}

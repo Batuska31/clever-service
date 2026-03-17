@@ -61,7 +61,7 @@ export function AIThinking({ onActivate, isActive: externalActive, size = 80 }: 
                 const glow = Math.sin(this.pulse) * 0.5 + 0.5
                 ctx.beginPath()
                 ctx.arc(this.renderX, this.renderY, this.renderSize, 0, Math.PI * 2)
-                ctx.fillStyle = `rgba(0, 240, 255, ${this.opacity * (0.3 + glow * 0.7)})`
+                ctx.fillStyle = `rgba(255, 193, 7, ${this.opacity * (0.3 + glow * 0.7)})`
                 ctx.fill()
             }
         }
@@ -118,11 +118,11 @@ export function AIThinking({ onActivate, isActive: externalActive, size = 80 }: 
                     style={{
                         width: '100%',
                         height: '100%',
-                        background: 'linear-gradient(135deg, #ff5eb3 0%, #7c3aed 50%, #75b3ff 100%)',
-                        boxShadow: '0 10px 25px rgba(124, 58, 237, 0.3), inset 0 2px 10px rgba(255, 255, 255, 0.3)'
+                        background: 'linear-gradient(135deg, #1A237E 0%, #0E1171 50%, #FFC107 100%)',
+                        boxShadow: '0 10px 25px rgba(14, 17, 113, 0.4), inset 0 2px 10px rgba(255, 255, 255, 0.2)'
                     }}
                 >
-                    <div className="absolute inset-[-3px] rounded-full bg-gradient-to-r from-[#ff5eb3] via-[#7c3aed] to-[#75b3ff] opacity-20 blur-lg group-hover:opacity-40 transition-opacity" />
+                    <div className="absolute inset-[-3px] rounded-full bg-gradient-to-r from-[#1A237E] via-[#0E1171] to-[#FFC107] opacity-20 blur-lg group-hover:opacity-40 transition-opacity" />
                     <svg
                         className="fill-white drop-shadow-sm"
                         style={{ width: '40%', height: '40%' }}
@@ -146,7 +146,7 @@ export function AIThinking({ onActivate, isActive: externalActive, size = 80 }: 
 
             {isActive && (
                 <div className="absolute bottom-6 text-center pointer-events-none w-full z-10">
-                    <div className="text-[14px] font-medium tracking-[0.1em] uppercase text-[#00f0ff] animate-pulse-glow" style={{ textShadow: '0 0 10px rgba(0, 240, 255, 0.3)' }}>
+                    <div className="text-[14px] font-medium tracking-[0.1em] uppercase text-[#FFC107] animate-pulse-glow" style={{ textShadow: '0 0 10px rgba(255, 193, 7, 0.4)' }}>
                         {taskText}
                     </div>
                 </div>
