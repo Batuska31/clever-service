@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/user/.gemini/antigravity/scratch/omnidoc/**)",
+      "Bash(cat /c/Users/user/.gemini/antigravity/scratch/omnidoc/packages/typescript-config/*)",
+      "Bash(cat /c/Users/user/.gemini/antigravity/scratch/omnidoc/packages/eslint-config/*)",
+      "Bash(npm install)",
+      "Bash(npx prisma generate)",
+      "Bash(npx prisma migrate dev --name \"add_new_models\" --skip-seed)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\db\\prisma",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\engine\\src\\types",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\engine\\src\\adapters",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\engine\\src\\rules",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\engine\\src",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\engine",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\apps\\worker\\src",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc\\packages\\db",
+      "C:\\Users\\user\\.gemini\\antigravity\\scratch\\omnidoc"
+    ]
+  }
+}
