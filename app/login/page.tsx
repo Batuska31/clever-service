@@ -49,15 +49,17 @@ export default function LoginPage() {
         }
     }
 
-    // Particles
-    const particles = Array.from({ length: 30 }, (_, i) => ({
-        id: i,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: Math.random() * 2.5 + 0.5,
-        duration: Math.random() * 25 + 15,
-        delay: Math.random() * 12,
-    }))
+    const [particles] = useState(() =>
+        Array.from({ length: 30 }, (_, i) => ({
+            id: i,
+            x: Math.random() * 100,
+            y: Math.random() * 100,
+            size: Math.random() * 2.5 + 0.5,
+            duration: Math.random() * 25 + 15,
+            delay: Math.random() * 12,
+            drift: Math.random() * 40 - 20,
+        }))
+    )
 
     return (
         <div className="login-page">
@@ -72,7 +74,7 @@ export default function LoginPage() {
                         width: "min(500px, 80vw)",
                         height: "min(500px, 80vw)",
                         borderRadius: "50%",
-                        background: "radial-gradient(circle, rgba(124,58,237,0.18), transparent 65%)",
+                        background: "radial-gradient(circle, rgba(14,17,113,0.28), transparent 65%)",
                         top: "-15%",
                         left: "-15%",
                         filter: "blur(60px)",
@@ -86,7 +88,7 @@ export default function LoginPage() {
                         width: "min(450px, 70vw)",
                         height: "min(450px, 70vw)",
                         borderRadius: "50%",
-                        background: "radial-gradient(circle, rgba(6,255,195,0.1), transparent 65%)",
+                        background: "radial-gradient(circle, rgba(74,144,226,0.12), transparent 65%)",
                         bottom: "-20%",
                         right: "-15%",
                         filter: "blur(70px)",
@@ -100,7 +102,7 @@ export default function LoginPage() {
                         width: "min(300px, 50vw)",
                         height: "min(300px, 50vw)",
                         borderRadius: "50%",
-                        background: "radial-gradient(circle, rgba(255,45,135,0.07), transparent 60%)",
+                        background: "radial-gradient(circle, rgba(255,193,7,0.08), transparent 60%)",
                         top: "40%",
                         right: "20%",
                         filter: "blur(55px)",
@@ -127,7 +129,7 @@ export default function LoginPage() {
                     }}
                     animate={{
                         y: [0, -80, 0],
-                        x: [0, Math.random() * 40 - 20, 0],
+                        x: [0, p.drift, 0],
                         opacity: [0, 0.6, 0],
                     }}
                     transition={{

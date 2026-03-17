@@ -1,618 +1,1483 @@
 "use client"
 
 import * as React from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/lib/auth-store"
 import { useTheme } from "@/lib/theme-provider"
 import { AIThinking } from "../components/AIThinking"
 
-const isBrowser = typeof window !== "undefined"
+type Role = "user" | "assistant"
+type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "done" | "error"
 
-// ─────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────
 type Msg = {
-    id: string
-    role: "user" | "assistant"
-    content: string
-    typing?: boolean
-    time?: string
+  id: string
+  role: Role
+  content: string
+  typing?: boolean
+  time?: string
 }
 
 type ChatSession = {
-    id: string
-    title: string
-    lastMessage: string
-    time: string
+  id: string
+  title: string
+  lastMessage: string
+  time: string
 }
+
+type IconName =
+  | "plus"
+  | "search"
+  | "history"
+  | "mic"
+  | "spark"
+  | "layers"
+  | "team"
+  | "calendar"
+  | "wave"
+  | "send"
+  | "copy"
+  | "sun"
+  | "moon"
+  | "logout"
+  | "menu"
+  | "arrow-right"
+  | "chart"
+  | "close"
+  | "badge"
+  | "planet"
+
+type FeatureCard = {
+  icon: IconName
+  kicker: string
+  title: string
+  body: string
+  prompt: string
+  tone: "amber" | "sky" | "indigo"
+}
+
+type InsightMetric = {
+  label: string
+  value: string
+  detail: string
+}
+
+type ActionChip = {
+  label: string
+  prompt: string
+  icon: IconName
+}
+
+type SpeechRecognitionChunk = {
+  transcript: string
+}
+
+type SpeechRecognitionResultLike = {
+  isFinal: boolean
+  0: SpeechRecognitionChunk
+}
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number
+  results: ArrayLike<SpeechRecognitionResultLike>
+}
+
+type SpeechRecognitionErrorLike = {
+  error: string
+}
+
+type BrowserSpeechRecognition = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: ((event: SpeechRecognitionErrorLike) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition
+
+type VoiceWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionCtor
+  webkitSpeechRecognition?: BrowserSpeechRecognitionCtor
+}
+
+const FEATURE_CARDS: FeatureCard[] = [
+  {
+    icon: "layers",
+    kicker: "Workflow Canvas",
+    title: "Ekip akışlarını, geri bildirimleri ve görevleri tek panelde topla.",
+    body: "AI istekleri başlıklandırır, önceliklendirir ve net bir aksiyon planına dönüştürür.",
+    prompt: "Bu haftanın ekip aksiyon planını üç öncelikli başlıkla çıkar.",
+    tone: "amber",
+  },
+  {
+    icon: "team",
+    kicker: "Alignment Pulse",
+    title: "Satış, operasyon ve pazarlama verilerini ortak bağlamda birleştir.",
+    body: "Farklı ekiplerden gelen girdiler tek cevapta birleşir ve tekrar eden açıklama yükü azalır.",
+    prompt: "Satış ve operasyon ekipleri için ortak bir günlük durum özeti hazırla.",
+    tone: "sky",
+  },
+  {
+    icon: "calendar",
+    kicker: "Priority Engine",
+    title: "Gününü akıllı bloklara ayır, kritik işleri önce yüzeye çıkar.",
+    body: "Zaman planı, risk işaretleri ve hızlı kazanımlar aynı çalışma alanında görünür olur.",
+    prompt: "Bugün için odaklanmam gereken en kritik üç işi sırala.",
+    tone: "indigo",
+  },
+]
+
+const INSIGHT_METRICS: InsightMetric[] = [
+  {
+    label: "Aktif otomasyon",
+    value: "12 akış",
+    detail: "Sipariş, stok ve CRM hareketleri senkron ilerliyor.",
+  },
+  {
+    label: "Bugünkü cevap ritmi",
+    value: "1.2 sn",
+    detail: "Kısa özetler ve yönlendirmeler canlı akışta tutuluyor.",
+  },
+  {
+    label: "Odak modu",
+    value: "Canlı",
+    detail: "Sesli komut, hızlı kartlar ve görev özetleri aynı yerden çalışıyor.",
+  },
+]
+
+const QUICK_ACTIONS: ActionChip[] = [
+  {
+    label: "Sprint planı",
+    prompt: "Bu hafta için sprint planı çıkar ve ekip rolleriyle özetle.",
+    icon: "spark",
+  },
+  {
+    label: "Stok radarı",
+    prompt: "Kritik stok risklerini ve önerilen aksiyonları listele.",
+    icon: "chart",
+  },
+  {
+    label: "Toplantı brifi",
+    prompt: "Akşam toplantısı için 5 maddelik kısa briefing hazırla.",
+    icon: "badge",
+  },
+  {
+    label: "Sesli özet",
+    prompt: "Bugünkü operasyonu yöneticinin dinleyebileceği kısa bir sesli özet formatında hazırla.",
+    icon: "wave",
+  },
+]
+
+const RAIL_ACTIONS: Array<{ id: string; label: string; icon: IconName }> = [
+  { id: "new", label: "Yeni sohbet", icon: "plus" },
+  { id: "search", label: "Arama", icon: "search" },
+  { id: "voice", label: "Sesli stüdyo", icon: "mic" },
+  { id: "history", label: "Geçmiş", icon: "history" },
+]
+
+const MOCK_HISTORY: ChatSession[] = [
+  {
+    id: "session-1",
+    title: "Satış ivmesi analizi",
+    lastMessage: "Kampanya sonrası dönüşüm oranı yükseliyor.",
+    time: "Bugün",
+  },
+  {
+    id: "session-2",
+    title: "Stok uyarıları",
+    lastMessage: "Beş ürün için kritik eşik yaklaşıyor.",
+    time: "Dün",
+  },
+  {
+    id: "session-3",
+    title: "Toplantı notları",
+    lastMessage: "Yönetici özeti ve aksiyon listesi hazır.",
+    time: "2 gün önce",
+  },
+]
+
+const VOICE_COPY: Record<VoiceState, { title: string; detail: string }> = {
+  idle: {
+    title: "Hazır",
+    detail: "Mikrofona dokun, doğal dilde konuş ve isteğini hızlıca işle.",
+  },
+  listening: {
+    title: "Dinliyorum",
+    detail: "Konuşurken canlı dalga ve transkript aynı anda güncellenir.",
+  },
+  thinking: {
+    title: "Yorumluyorum",
+    detail: "Duyduğum komutu bağlamla eşleştirip en iyi yanıtı hazırlıyorum.",
+  },
+  speaking: {
+    title: "Yanıtlıyorum",
+    detail: "İstersen cevabı sesli olarak aktarırım ve eller serbest modda devam ederim.",
+  },
+  done: {
+    title: "Tamamlandı",
+    detail: "İstersen tekrar dinleme moduna geçebilir veya sonucu metin olarak düzenleyebilirsin.",
+  },
+  error: {
+    title: "Mikrofon sorunu",
+    detail: "Tarayıcı izinlerini veya cihaz girişini kontrol etmen gerekiyor olabilir.",
+  },
+}
+
+const isBrowser = typeof window !== "undefined"
 
 function uid() {
-    return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
-function clampText(s: string, max = 4000) {
-    const t = String(s || "")
-    return t.length > max ? t.slice(0, max) : t
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
 function now() {
-    return new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+  return new Date().toLocaleTimeString("tr-TR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
-// ─── Quick Prompts ───
-const QUICK_PROMPTS = [
-    { icon: "📊", title: "Rapor Hazırla", desc: "Günlük satış raporunu getir", q: "Günlük satış raporumu göster" },
-    { icon: "📦", title: "Stok Durumu", desc: "Düşük stokları kontrol et", q: "Düşük stoktaki ürünleri listele" },
-    { icon: "💡", title: "Öneri Al", desc: "İş geliştirme fikirleri", q: "Satışlarımı artırmak için önerilerin neler?" },
-    { icon: "🔧", title: "Ayarlar", desc: "Sistem ayarlarını yönet", q: "Hangi sistem ayarlarını düzenleyebilirim?" },
-]
-
-// ─── Hooks ───
-function useRealVH() {
-    React.useEffect(() => {
-        if (!isBrowser) return
-        function set() {
-            const vh = window.innerHeight * 0.01
-            document.documentElement.style.setProperty("--vh", `${vh}px`)
-        }
-        set()
-        window.addEventListener("resize", set)
-        window.addEventListener("orientationchange", set)
-        return () => {
-            window.removeEventListener("resize", set)
-            window.removeEventListener("orientationchange", set)
-        }
-    }, [])
+function clampText(input: string, limit = 3000) {
+  const normalized = String(input || "").trim()
+  return normalized.length > limit ? normalized.slice(0, limit) : normalized
 }
 
-function useTypingEffect(text: string, speed = 18, enabled = true) {
-    const [displayed, setDisplayed] = React.useState("")
-    const [done, setDone] = React.useState(false)
+function useRealViewport() {
+  React.useEffect(() => {
+    if (!isBrowser) return
 
-    React.useEffect(() => {
-        if (!enabled) { setDisplayed(text); setDone(true); return }
-        setDisplayed(""); setDone(false)
-        let i = 0
-        const iv = setInterval(() => {
-            i++
-            setDisplayed(text.slice(0, i))
-            if (i >= text.length) { clearInterval(iv); setDone(true) }
-        }, speed)
-        return () => clearInterval(iv)
-    }, [text, speed, enabled])
+    const updateHeight = () => {
+      const vh = window.innerHeight * 0.01
+      document.documentElement.style.setProperty("--vh", `${vh}px`)
+    }
 
-    return { displayed, done }
+    updateHeight()
+    window.addEventListener("resize", updateHeight)
+    window.addEventListener("orientationchange", updateHeight)
+    return () => {
+      window.removeEventListener("resize", updateHeight)
+      window.removeEventListener("orientationchange", updateHeight)
+    }
+  }, [])
 }
 
-function useIsTouch() {
-    const [isTouch, setIsTouch] = React.useState(false)
-    React.useEffect(() => {
-        if (!isBrowser) return
-        setIsTouch("ontouchstart" in window || navigator.maxTouchPoints > 0)
-    }, [])
-    return isTouch
+function useTypingEffect(text: string, enabled: boolean) {
+  const [displayed, setDisplayed] = React.useState(enabled ? "" : text)
+  const [done, setDone] = React.useState(!enabled)
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setDisplayed(text)
+      setDone(true)
+      return
+    }
+
+    setDisplayed("")
+    setDone(false)
+    let index = 0
+    const interval = window.setInterval(() => {
+      index += 1
+      setDisplayed(text.slice(0, index))
+      if (index >= text.length) {
+        window.clearInterval(interval)
+        setDone(true)
+      }
+    }, 15)
+
+    return () => window.clearInterval(interval)
+  }, [enabled, text])
+
+  return { displayed, done }
 }
 
-// ─────────────────────────────────────────────
-// MAIN COMPONENT
-// ─────────────────────────────────────────────
+function buildFallbackAnswer(question: string, firstName: string) {
+  const lower = question.toLocaleLowerCase("tr-TR")
+
+  if (lower.includes("stok")) {
+    return `${firstName}, demo modunda gördüğüm hızlı aksiyon: düşük stoktaki ürünleri ABC önceliğine göre grupla, ilk üç ürün için tedarik süresini teyit et ve kampanya baskısı olan ürünleri bugün ayır.`
+  }
+
+  if (lower.includes("rapor") || lower.includes("satış")) {
+    return `${firstName}, kısa yönetici özeti: satış ritmi stabil, yüksek marjlı ürünler öne çıkıyor ve bugün için en mantıklı aksiyon kampanya sonrası geri dönen kullanıcıları ikinci teklif akışına almak.`
+  }
+
+  if (lower.includes("toplantı") || lower.includes("brief")) {
+    return `${firstName}, toplantı için önerdiğim yapı: 1) bugünün kritik sinyalleri, 2) riskli başlıklar, 3) hızlı kazanımlar, 4) ekip sahipleri, 5) gün sonu beklenen çıktı.`
+  }
+
+  return `${firstName}, canlı servis erişilebilir değilse bile demo modunda net bir yön öneriyorum: isteği üç parçaya ayır, önceliği belirle, ardından ekip veya operasyon için uygulanabilir adımları tek liste halinde çıkar.`
+}
+
 export default function AIChatPage() {
-    useRealVH()
-    const { theme, toggleTheme } = useTheme()
+  useRealViewport()
 
-    // === DEV MODE: BYPASS AUTH ===
-    const isLoggedIn = true
-    const role = "admin"
-    const tenantId = "dev_tenant_123"
-    const userId = "dev_user_123"
-    // =============================
+  const router = useRouter()
+  const { theme, toggleTheme } = useTheme()
+  const {
+    loading: authLoading,
+    fullName,
+    userId,
+    tenantId,
+    role,
+    signOut,
+  } = useAuth()
 
-    const isTouch = useIsTouch()
-    const router = useRouter()
+  const greetingSpokenRef = React.useRef<string | null>(null)
+  const chatEndRef = React.useRef<HTMLDivElement>(null)
+  const inputRef = React.useRef<HTMLTextAreaElement>(null)
+  const speakRef = React.useRef<(value: string) => void>(() => {})
+  const startListeningRef = React.useRef<() => Promise<void>>(async () => {})
+  const stopListeningRef = React.useRef<(closePanel: boolean) => void>(() => {})
+  const toastTimerRef = React.useRef<number | null>(null)
+  const micTimeoutRef = React.useRef<number | null>(null)
+  const recognitionRef = React.useRef<BrowserSpeechRecognition | null>(null)
+  const isRecordingRef = React.useRef(false)
+  const stopRequestedRef = React.useRef(false)
+  const finalTranscriptRef = React.useRef("")
+  const fallbackNoticeRef = React.useRef(false)
 
-    // STATE
-    const [loading, setLoading] = React.useState(false)
-    const [sending, setSending] = React.useState(false)
-    const [conversationId, setConversationId] = React.useState<string | null>(null)
-    const [messages, setMessages] = React.useState<Msg[]>([])
-    const [text, setText] = React.useState("")
-    const greetedRef = React.useRef(false)
-    const chatEndRef = React.useRef<HTMLDivElement>(null)
-    const chatAreaRef = React.useRef<HTMLDivElement>(null)
-    const inputRef = React.useRef<HTMLTextAreaElement>(null)
+  const firstName = (fullName || "Patron").split(" ")[0]
+  const activeTenantId = tenantId ?? "dev_tenant_123"
+  const activeUserId = userId ?? "dev_user_123"
+  const canUse = !authLoading && (!role || ["admin", "seller", "owner"].includes(role))
+  const dateLabel = new Intl.DateTimeFormat("tr-TR", {
+    day: "numeric",
+    month: "long",
+  }).format(new Date())
 
-    const [kbVisible, setKbVisible] = React.useState(false)
-    const [sidebarOpen, setSidebarOpen] = React.useState(false)
-    const [toast, setToast] = React.useState<string | null>(null)
+  const [conversationId, setConversationId] = React.useState<string | null>(null)
+  const [messages, setMessages] = React.useState<Msg[]>([])
+  const [text, setText] = React.useState("")
+  const [sending, setSending] = React.useState(false)
+  const [sidebarOpen, setSidebarOpen] = React.useState(false)
+  const [toast, setToast] = React.useState<string | null>(null)
+  const [lastError, setLastError] = React.useState<string | null>(null)
+  const [keyboardRaised, setKeyboardRaised] = React.useState(false)
+  const [voiceOpen, setVoiceOpen] = React.useState(false)
+  const [handsfree, setHandsfree] = React.useState(false)
+  const [autoSpeak, setAutoSpeak] = React.useState(true)
+  const [autoSendOnStop, setAutoSendOnStop] = React.useState(true)
+  const [voiceState, setVoiceState] = React.useState<VoiceState>("idle")
+  const [voiceText, setVoiceText] = React.useState("")
+  const [chatHistory, setChatHistory] = React.useState<ChatSession[]>(MOCK_HISTORY)
 
-    // Chat history (mock for now)
-    const [chatHistory, setChatHistory] = React.useState<ChatSession[]>([
-        { id: "1", title: "Satış raporu analizi", lastMessage: "Toplam gelir ₺450K", time: "Bugün" },
-        { id: "2", title: "Stok kontrolü", lastMessage: "5 ürün düşük stokta", time: "Dün" },
-        { id: "3", title: "Müşteri segmentasyonu", lastMessage: "VIP müşteri listesi hazır", time: "2 gün önce" },
+  const showcaseVisible = messages.length <= 1
+  const voicePanelVisible = voiceOpen || voiceState !== "idle" || Boolean(voiceText)
+  const voiceMeta = VOICE_COPY[voiceState]
+  const latestAssistantMessage = React.useMemo(
+    () => [...messages].reverse().find((message) => message.role === "assistant") ?? null,
+    [messages]
+  )
+
+  const showToast = React.useCallback((message: string) => {
+    setToast(message)
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null)
+    }, 2200)
+  }, [])
+
+  React.useEffect(() => {
+    if (!isBrowser) return
+    const viewport = window.visualViewport
+    if (!viewport) return
+
+    const handleResize = () => {
+      setKeyboardRaised(viewport.height < window.innerHeight * 0.8)
+    }
+
+    viewport.addEventListener("resize", handleResize)
+    return () => viewport.removeEventListener("resize", handleResize)
+  }, [])
+
+  React.useEffect(() => {
+    if (!canUse || messages.length > 0) return
+    setMessages([
+      {
+        id: uid(),
+        role: "assistant",
+        content: `Merhaba ${firstName}. Bugün hangi iş akışını hızlandıralım?`,
+        typing: true,
+        time: now(),
+      },
     ])
+  }, [canUse, firstName, messages.length])
 
-    // Voice
-    const [voiceOpen, setVoiceOpen] = React.useState(false)
-    const [voiceMenuOpen, setVoiceMenuOpen] = React.useState(false)
-    const [autoSpeak, setAutoSpeak] = React.useState(true)
-    const [autoSendOnStop, setAutoSendOnStop] = React.useState(true)
-    const [handsfree, setHandsfree] = React.useState(false)
-    const [voiceState, setVoiceState] = React.useState<
-        "idle" | "listening" | "thinking" | "speaking" | "done" | "error"
-    >("idle")
-    const [voiceText, setVoiceText] = React.useState("")
-    const [lastError, setLastError] = React.useState<string | null>(null)
-    const recognitionRef = React.useRef<any>(null)
-    const isRecordingRef = React.useRef(false)
-    const stopRequestedRef = React.useRef(false)
-    const micTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+  React.useEffect(() => {
+    if (!autoSpeak || messages.length === 0) return
+    const firstMessage = messages[0]
+    if (firstMessage.role !== "assistant") return
+    if (greetingSpokenRef.current === firstMessage.id) return
 
-    // Reset microphone timeout (6 seconds)
-    function resetMicTimeout() {
-        if (micTimeoutRef.current) clearTimeout(micTimeoutRef.current)
-        micTimeoutRef.current = setTimeout(() => {
-            if (isRecordingRef.current) {
-                stopListening()
-                setVoiceOpen(false)
-                setHandsfree(false)
-                showToast("Sessizlik algılandı, mikrofon kapatıldı.")
-            }
-        }, 6000)
+    greetingSpokenRef.current = firstMessage.id
+    speakRef.current(firstMessage.content)
+  }, [autoSpeak, messages])
+
+  React.useEffect(() => {
+    const element = inputRef.current
+    if (!element) return
+    element.style.height = "auto"
+    element.style.height = `${Math.min(element.scrollHeight, 180)}px`
+  }, [text])
+
+  React.useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [messages, sending, voicePanelVisible])
+
+  React.useEffect(() => {
+    if (!voiceOpen) {
+      stopListeningRef.current(false)
+      return
     }
 
-    function clearMicTimeout() {
-        if (micTimeoutRef.current) clearTimeout(micTimeoutRef.current)
-    }
+    const timer = window.setTimeout(() => {
+      void startListeningRef.current()
+    }, 280)
 
-    const [particles] = React.useState(() => {
-        const count = isBrowser && window.innerWidth < 500 ? 10 : 20
-        return Array.from({ length: count }, (_, i) => ({
-            id: i, x: Math.random() * 100, y: Math.random() * 100,
-            size: Math.random() * 2.5 + 0.8, duration: Math.random() * 22 + 14, delay: Math.random() * 10,
-        }))
+    return () => window.clearTimeout(timer)
+  }, [voiceOpen])
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
+      if (micTimeoutRef.current) window.clearTimeout(micTimeoutRef.current)
+      stopListeningRef.current(false)
+      stopSpeak()
+    }
+  }, [])
+
+  function resetMicTimeout() {
+    if (micTimeoutRef.current) window.clearTimeout(micTimeoutRef.current)
+    micTimeoutRef.current = window.setTimeout(() => {
+      if (!isRecordingRef.current) return
+      stopListening(true)
+      setHandsfree(false)
+      setVoiceOpen(false)
+      showToast("Sessizlik algılandı, dinleme kapatıldı.")
+    }, 6500)
+  }
+
+  function clearMicTimeout() {
+    if (micTimeoutRef.current) window.clearTimeout(micTimeoutRef.current)
+    micTimeoutRef.current = null
+  }
+
+  function copyText(value: string) {
+    navigator.clipboard
+      .writeText(value)
+      .then(() => showToast("Metin panoya kopyalandı."))
+      .catch(() => showToast("Panoya kopyalama yapılamadı."))
+  }
+
+  function startNewConversation() {
+    closeVoiceStudio()
+    setConversationId(null)
+    setMessages([])
+    setText("")
+    setLastError(null)
+    setVoiceText("")
+    greetingSpokenRef.current = null
+    setSidebarOpen(false)
+  }
+
+  function pushHistoryPreview(title: string, lastMessage: string, id?: string) {
+    setChatHistory((current) => {
+      const nextId = id || uid()
+      const next = {
+        id: nextId,
+        title: title.slice(0, 56),
+        lastMessage: lastMessage.slice(0, 72),
+        time: "Şimdi",
+      }
+
+      return [next, ...current.filter((item) => item.id !== nextId)].slice(0, 8)
     })
+  }
 
-    // Toast helper
-    function showToast(msg: string) {
-        setToast(msg)
-        setTimeout(() => setToast(null), 2000)
+  async function submitPrompt(rawPrompt: string) {
+    const prompt = clampText(rawPrompt, 2500)
+    if (!prompt || sending) return
+
+    const previewId = conversationId ?? uid()
+    setConversationId((current) => current ?? previewId)
+    pushHistoryPreview(prompt, "Yanıt hazırlanıyor...", previewId)
+    setMessages((current) => [
+      ...current,
+      { id: uid(), role: "user", content: prompt, time: now() },
+    ])
+    setSending(true)
+    setLastError(null)
+    setVoiceText("")
+
+    try {
+      const { data, error } = await supabase.functions.invoke("patron-ai", {
+        body: {
+          tenant_id: activeTenantId,
+          user_id: activeUserId,
+          question: prompt,
+          conversation_id: conversationId,
+        },
+      })
+
+      if (error) throw error
+      if (!data?.answer) throw new Error(data?.error || "Yanıt üretilemedi.")
+
+      const nextConversationId = String(data?.conversation_id || previewId)
+      const answer = String(data.answer).trim()
+
+      setConversationId(nextConversationId)
+      setMessages((current) => [
+        ...current,
+        {
+          id: uid(),
+          role: "assistant",
+          content: answer,
+          typing: true,
+          time: now(),
+        },
+      ])
+      pushHistoryPreview(prompt, answer, nextConversationId)
+
+      if (autoSpeak) speak(answer)
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Yanıt alınamadı, demo cevap gösteriliyor."
+      const fallbackAnswer = buildFallbackAnswer(prompt, firstName)
+      setLastError(errorMessage)
+      setMessages((current) => [
+        ...current,
+        {
+          id: uid(),
+          role: "assistant",
+          content: fallbackAnswer,
+          typing: true,
+          time: now(),
+        },
+      ])
+      pushHistoryPreview(prompt, fallbackAnswer, previewId)
+
+      if (!fallbackNoticeRef.current) {
+        fallbackNoticeRef.current = true
+        showToast("Canlı servis yerine demo cevap gösteriliyor.")
+      }
+
+      if (autoSpeak) speak(fallbackAnswer)
+    } finally {
+      setSending(false)
     }
+  }
 
-    // Copy text
-    function copyText(t: string) {
-        navigator.clipboard.writeText(t).then(() => showToast("📋 Kopyalandı!")).catch(() => { })
+  function stopSpeak() {
+    if (!isBrowser) return
+    try {
+      window.speechSynthesis?.cancel?.()
+    } catch {
+      return
     }
+  }
 
-    // ─── KEYBOARD (iOS) ───
-    React.useEffect(() => {
-        if (!isBrowser) return
-        const vv = (window as any).visualViewport
-        if (!vv) return
-        function onResize() {
-            const isKb = vv.height < window.innerHeight * 0.8
-            setKbVisible(isKb)
-            if (isKb) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
+  function speak(value: string) {
+    if (!isBrowser || !value) return
+
+    try {
+      stopSpeak()
+      const utterance = new SpeechSynthesisUtterance(value)
+      utterance.lang = "tr-TR"
+      utterance.rate = 1
+      utterance.pitch = 1
+      utterance.onstart = () => setVoiceState("speaking")
+      utterance.onend = () => {
+        setVoiceState("done")
+        if (handsfree && voiceOpen) {
+          window.setTimeout(() => {
+            void startListening()
+          }, 420)
         }
-        vv.addEventListener("resize", onResize)
-        return () => vv.removeEventListener("resize", onResize)
-    }, [])
+      }
+      utterance.onerror = () => setVoiceState("error")
+      window.speechSynthesis.speak(utterance)
+    } catch {
+      setVoiceState("error")
+    }
+  }
 
-    const canUse = isLoggedIn && (role === "admin" || role === "seller" || role === "owner")
+  function getRecognition() {
+    if (!isBrowser) return null
+    const voiceWindow = window as VoiceWindow
+    const SR = voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition
+    if (!SR) return null
 
-    React.useEffect(() => {
-        setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50)
-    }, [messages, sending])
+    const recognition = new SR()
+    recognition.lang = "tr-TR"
+    recognition.interimResults = true
+    recognition.continuous = handsfree
+    return recognition
+  }
 
-    // GREETING
-    React.useEffect(() => {
-        if (!canUse || messages.length > 0) return
-        setMessages([{ id: uid(), role: "assistant", content: "Merhaba patron 😄 Sana nasıl yardımcı olabilirim?", typing: true, time: now() }])
-    }, [canUse, messages.length])
+  async function startListening() {
+    stopSpeak()
+    stopRequestedRef.current = false
+    finalTranscriptRef.current = ""
 
-    React.useEffect(() => {
-        if (!autoSpeak || !canUse || greetedRef.current || messages.length === 0) return
-        const first = messages[0]
-        if (first?.role !== "assistant") return
-        greetedRef.current = true
-        speak(first.content)
-    }, [messages, canUse, autoSpeak])
-
-    // SEND MESSAGE
-    async function sendMessage(q: string) {
-        if (!q.trim() || !userId || !tenantId) return
-        const clean = clampText(q.trim(), 2500)
-        const userMsg: Msg = { id: uid(), role: "user", content: clean, time: now() }
-        setMessages((prev) => [...prev, userMsg])
-        setSending(true)
-        setLastError(null)
-
-        try {
-            const { data, error } = await supabase.functions.invoke("patron-ai", {
-                body: { tenant_id: tenantId, user_id: userId, question: clean, conversation_id: conversationId },
-            })
-            if (error) throw error
-            if (!data?.answer) throw new Error(data?.error || "Cevap üretilemedi")
-            if (!conversationId && data?.conversation_id) setConversationId(String(data.conversation_id))
-            const answer = String(data?.answer || "").trim() || "Cevap gelmedi."
-            setMessages((prev) => [...prev, { id: uid(), role: "assistant", content: answer, typing: true, time: now() }])
-            if (autoSpeak) speak(answer)
-        } catch (e: any) {
-            setLastError(e?.message || "Gönderim hatası")
-            setMessages((prev) => [...prev, { id: uid(), role: "assistant", content: "Bir hata oldu, tekrar dener misin? 🙁", typing: true, time: now() }])
-        } finally {
-            setSending(false)
-        }
+    const recognition = getRecognition()
+    if (!recognition) {
+      setVoiceState("error")
+      showToast("Tarayıcı konuşma tanımayı desteklemiyor.")
+      return
     }
 
-    function stopSpeak() { if (!isBrowser) return; try { window.speechSynthesis?.cancel?.() } catch { } }
+    recognitionRef.current = recognition
+    isRecordingRef.current = true
+    setVoiceState("listening")
+    setVoiceText("")
+    clearMicTimeout()
+    resetMicTimeout()
 
-    function speak(t: string) {
-        if (!isBrowser) return
-        try {
-            stopSpeak()
-            const u = new SpeechSynthesisUtterance(String(t || ""))
-            u.lang = "tr-TR"; u.rate = 1.0; u.pitch = 1.0
-            u.onstart = () => setVoiceState("speaking")
-            u.onend = () => { setVoiceState("done"); if (handsfree && voiceOpen) setTimeout(() => startListening(), 500) }
-            u.onerror = () => setVoiceState("error")
-            window.speechSynthesis.speak(u)
-        } catch { }
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      resetMicTimeout()
+      let finalText = ""
+      let interimText = ""
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        const chunk = String(result[0]?.transcript || "")
+        if (result.isFinal) finalText += chunk
+        else interimText += chunk
+      }
+
+      if (finalText.trim()) finalTranscriptRef.current = finalText.trim()
+      const combined = [finalTranscriptRef.current, interimText.trim()].filter(Boolean).join(" ").trim()
+      setVoiceText(combined)
+
+      if (finalText.trim() && autoSendOnStop) {
+        clearMicTimeout()
+        stopListening(false)
+        setVoiceState("thinking")
+        window.setTimeout(() => {
+          void submitPrompt(finalText.trim())
+        }, 260)
+      }
     }
 
-    function getRecognition() {
-        if (!isBrowser) return null
-        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        if (!SR) return null
-        const rec = new SR(); rec.lang = "tr-TR"; rec.interimResults = true; rec.continuous = handsfree
-        return rec
+    recognition.onerror = (event: SpeechRecognitionErrorLike) => {
+      isRecordingRef.current = false
+      clearMicTimeout()
+      if (event.error === "no-speech") {
+        setVoiceState("done")
+        return
+      }
+
+      setVoiceState("error")
+      showToast("Mikrofona erişim sağlanamadı.")
     }
 
-    async function startListening() {
-        setLastError(null); stopRequestedRef.current = false
-        const rec = getRecognition()
-        if (!rec) { setLastError("Tarayıcı konuşma tanımayı desteklemiyor."); setVoiceState("error"); return }
-        recognitionRef.current = rec; isRecordingRef.current = true; setVoiceText(""); setVoiceState("listening")
-        resetMicTimeout() // Start timeout on listen
-        
-        rec.onresult = (event: any) => {
-            resetMicTimeout() // Reset timeout whenever voice is heard
-            try {
-                let finalText = "", interimText = ""
-                for (let i = 0; i < event.results.length; i++) {
-                    const r = event.results[i]
-                    if (r.isFinal) finalText += r[0].transcript; else interimText += r[0].transcript
-                }
-                const display = (finalText + interimText).trim()
-                if (display) setVoiceText(display)
-                if (finalText.trim() && autoSendOnStop) { 
-                    clearMicTimeout()
-                    stopListening()
-                    setVoiceState("thinking")
-                    setTimeout(() => sendMessage(finalText.trim()), 300) 
-                }
-            } catch (e) { console.log("onresult error:", e) }
-        }
-        rec.onerror = (e: any) => { if (e.error !== "no-speech") { setLastError("Mikrofon hatası."); setVoiceState("error") }; clearMicTimeout(); isRecordingRef.current = false }
-        rec.onend = () => { isRecordingRef.current = false; if (handsfree && !stopRequestedRef.current && voiceOpen) { setTimeout(() => startListening(), 350) } else { clearMicTimeout() } }
-        try { rec.start() } catch { setLastError("Mikrofon başlatılamadı."); setVoiceState("error"); clearMicTimeout() }
-    }
+    recognition.onend = () => {
+      isRecordingRef.current = false
+      clearMicTimeout()
 
-    function stopListening() { clearMicTimeout(); stopRequestedRef.current = true; try { recognitionRef.current?.stop?.() } catch { }; isRecordingRef.current = false; if (voiceState === "listening") setVoiceState("done") }
-
-    React.useEffect(() => {
-        if (!voiceOpen) { stopListening(); stopSpeak(); setVoiceMenuOpen(false); return }
-        setTimeout(() => startListening(), 300)
-    }, [voiceOpen])
-
-    const showQuickPrompts = messages.length <= 1
-
-    // ─── LOADING ───
-    if (loading) {
-        return (
-            <div className="patron-page patron-load-wrap">
-                <motion.div className="patron-load-orb" animate={{ scale: [1, 1.3, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1.5, repeat: Infinity }} />
-                <div className="patron-load-label">Yükleniyor...</div>
-            </div>
+      if (!autoSendOnStop && finalTranscriptRef.current) {
+        setText((current) =>
+          current ? `${current.trim()} ${finalTranscriptRef.current}`.trim() : finalTranscriptRef.current
         )
+      }
+
+      if (handsfree && !stopRequestedRef.current && voiceOpen) {
+        window.setTimeout(() => {
+          void startListening()
+        }, 420)
+        return
+      }
+
+      setVoiceState((current) => (current === "listening" ? "done" : current))
     }
 
-    // ─── RENDER ───
+    try {
+      recognition.start()
+    } catch {
+      clearMicTimeout()
+      setVoiceState("error")
+      showToast("Mikrofon başlatılamadı.")
+    }
+  }
+
+  function stopListening(closePanel: boolean) {
+    clearMicTimeout()
+    stopRequestedRef.current = true
+    isRecordingRef.current = false
+
+    try {
+      recognitionRef.current?.stop?.()
+    } catch {
+      return
+    } finally {
+      recognitionRef.current = null
+    }
+
+    if (closePanel) {
+      setVoiceOpen(false)
+      setHandsfree(false)
+      setVoiceState("idle")
+      setVoiceText("")
+      finalTranscriptRef.current = ""
+      return
+    }
+
+    setVoiceState((current) => (current === "listening" ? "done" : current))
+  }
+
+  function openVoiceStudio() {
+    setVoiceOpen(true)
+    setLastError(null)
+  }
+
+  function closeVoiceStudio() {
+    stopSpeak()
+    stopListening(true)
+  }
+
+  speakRef.current = speak
+  startListeningRef.current = startListening
+  stopListeningRef.current = stopListening
+
+  async function handleSignOut() {
+    await signOut()
+    router.push("/login")
+  }
+
+  if (authLoading) {
     return (
-        <div className="patron-page">
-            <div className="patron-bg" />
+      <div className="cs-loader-screen">
+        <div className="cs-loader-orb" />
+        <p>Komut stüdyosu hazırlanıyor...</p>
+      </div>
+    )
+  }
 
-            {/* Particles */}
-            {particles.map((p) => (
-                <motion.div key={p.id} style={{ position: "absolute", width: p.size, height: p.size, borderRadius: "50%", background: theme === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.04)", left: `${p.x}%`, top: `${p.y}%`, zIndex: 1, pointerEvents: "none" as const }}
-                    animate={{ y: [0, -70, 0], x: [0, Math.random() * 30 - 15, 0], opacity: [0, 0.45, 0] }}
-                    transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: "easeInOut" }}
-                />
+  return (
+    <div className="cs-page">
+      <div className="cs-bg-grid" />
+      <div className="cs-gradient cs-gradient-a" />
+      <div className="cs-gradient cs-gradient-b" />
+      <div className="cs-gradient cs-gradient-c" />
+
+      <div className="cs-shell">
+        <aside className="cs-rail">
+          <button className="cs-rail-brand" onClick={startNewConversation} type="button">
+            <BrandMark size={30} className="cs-rail-brand-core" />
+          </button>
+
+          <div className="cs-rail-actions">
+            {RAIL_ACTIONS.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                className="cs-rail-button"
+                onClick={() => {
+                  if (action.id === "new") startNewConversation()
+                  if (action.id === "history") setSidebarOpen(true)
+                  if (action.id === "voice") openVoiceStudio()
+                  if (action.id === "search") inputRef.current?.focus()
+                }}
+                title={action.label}
+              >
+                <Icon name={action.icon} />
+              </button>
             ))}
+          </div>
 
-            {/* Orbs */}
-            <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 1, pointerEvents: "none" as const }}>
-                <motion.div className="patron-orb-purple" animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0], scale: [1, 1.15, 0.9, 1] }} transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }} />
-                <motion.div className="patron-orb-cyan" animate={{ x: [0, -35, 25, 0], y: [0, 35, -20, 0], scale: [1, 0.85, 1.1, 1] }} transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }} />
-                <motion.div className="patron-orb-pink" animate={{ x: [0, 20, -30, 0], y: [0, -40, 15, 0] }} transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }} />
+          <div className="cs-rail-footer">
+            <span className="cs-rail-footer-dot" />
+            <span>CS</span>
+          </div>
+        </aside>
+
+        <div className="cs-app">
+          <motion.header
+            className="cs-topbar"
+            initial={{ y: -18, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.4 }}
+          >
+            <div className="cs-topbar-left">
+              <button
+                type="button"
+                className="cs-icon-button cs-mobile-only"
+                onClick={() => setSidebarOpen(true)}
+              >
+                <Icon name="menu" />
+              </button>
+
+              <div className="cs-brand-lockup">
+                <BrandMark size={44} className="cs-brand-orb" />
+                <div>
+                  <div className="cs-brand-title">Eagle Command AI</div>
+                  <div className="cs-brand-subtitle">
+                    <span className="cs-live-dot" />
+                    Voice-first command studio
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* ── HEADER ── */}
-            <motion.div className="patron-header" initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.4 }}>
-                <div className="patron-header-left">
-                    {/* Sidebar toggle */}
-                    <motion.button className="patron-header-btn" whileTap={{ scale: 0.92 }} onClick={() => setSidebarOpen(true)} title="Sohbet geçmişi">
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="3" x2="21" y1="6" y2="6" /><line x1="3" x2="21" y1="12" y2="12" /><line x1="3" x2="21" y1="18" y2="18" />
-                        </svg>
-                    </motion.button>
-                    <motion.div className="patron-logo-orb" animate={{ rotate: 360 }} transition={{ duration: 30, repeat: Infinity, ease: "linear" }} style={{ overflow: "hidden", background: "white", padding: 2 }}>
-                        <img src="/eagle-logo.png" alt="Eagle" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                    </motion.div>
-                    <div>
-                        <div className="patron-title">Patron AI</div>
-                        <div className="patron-subtitle"><motion.span className="patron-dot" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 2, repeat: Infinity }} />Çevrimiçi</div>
+            <div className="cs-topbar-center">
+              <span>{dateLabel}</span>
+              <strong>Daily Nixio</strong>
+            </div>
+
+            <div className="cs-topbar-right">
+              <button type="button" className="cs-pill-button cs-upgrade-button">
+                <Icon name="badge" />
+                Pro Studio
+              </button>
+              <button type="button" className="cs-icon-button" onClick={toggleTheme}>
+                <Icon name={theme === "dark" ? "sun" : "moon"} />
+              </button>
+              <button type="button" className="cs-icon-button" onClick={openVoiceStudio}>
+                <Icon name="mic" />
+              </button>
+              <button type="button" className="cs-icon-button" onClick={startNewConversation}>
+                <Icon name="plus" />
+              </button>
+              <button type="button" className="cs-icon-button danger" onClick={() => void handleSignOut()}>
+                <Icon name="logout" />
+              </button>
+            </div>
+          </motion.header>
+
+          <main className="cs-main">
+            <AnimatePresence initial={false}>
+              {showcaseVisible && (
+                <motion.section
+                  className="cs-showcase"
+                  key="showcase"
+                  initial={{ opacity: 0, y: 26 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.45, ease: "easeOut" }}
+                >
+                  <div className="cs-showcase-hero">
+                    <div className="cs-kicker-row">
+                      <span className="cs-kicker-pill">Command workspace</span>
+                      <span className="cs-kicker-pill subtle">
+                        <Icon name="planet" />
+                        Ses, metin ve görev akışları tek yerde
+                      </span>
                     </div>
-                </div>
 
-                <div className="patron-header-right">
-                    {/* Theme toggle */}
-                    <motion.button className="theme-toggle-btn" whileHover={isTouch ? {} : { scale: 1.08 }} whileTap={{ scale: 0.92 }} onClick={toggleTheme} title={theme === "dark" ? "Açık Mod" : "Koyu Mod"}>
-                        {theme === "dark" ? (
-                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="5" /><line x1="12" x2="12" y1="1" y2="3" /><line x1="12" x2="12" y1="21" y2="23" /><line x1="4.22" x2="5.64" y1="4.22" y2="5.64" /><line x1="18.36" x2="19.78" y1="18.36" y2="19.78" /><line x1="1" x2="3" y1="12" y2="12" /><line x1="21" x2="23" y1="12" y2="12" /><line x1="4.22" x2="5.64" y1="19.78" y2="18.36" /><line x1="18.36" x2="19.78" y1="5.64" y2="4.22" />
-                            </svg>
-                        ) : (
-                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                            </svg>
-                        )}
-                    </motion.button>
+                    <div className="cs-headline-block">
+                      <p className="cs-overline">Yeni nesil operasyon yüzeyi</p>
+                      <h1>Merhaba {firstName}, bugün büyük resmi birlikte netleştirelim.</h1>
+                      <p className="cs-lead">
+                        Referans görseldeki yumuşak kart düzenini daha güçlü bir komut merkezi
+                        deneyimine taşıdım. Hızlı aksiyonlar, canlı durum kartları ve gelişmiş sesli
+                        etkileşim aynı akışta birleşiyor.
+                      </p>
+                    </div>
 
-                    <motion.button className="patron-header-btn" whileHover={isTouch ? {} : { scale: 1.08 }} whileTap={{ scale: 0.92 }} onClick={() => setVoiceOpen(true)} title="Sesli sohbet">
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" /></svg>
-                    </motion.button>
+                    <div className="cs-hero-actions">
+                      <button
+                        type="button"
+                        className="cs-primary-button"
+                        onClick={() =>
+                          void submitPrompt("Bugün için yönetici düzeyinde net bir odak planı oluştur.")
+                        }
+                      >
+                        Hızlı plan oluştur
+                        <Icon name="arrow-right" />
+                      </button>
+                      <button
+                        type="button"
+                        className="cs-secondary-button"
+                        onClick={openVoiceStudio}
+                      >
+                        <Icon name="wave" />
+                        Sesli briefing başlat
+                      </button>
+                    </div>
 
-                    <motion.button className="patron-header-btn" whileHover={isTouch ? {} : { scale: 1.08 }} whileTap={{ scale: 0.92 }} onClick={() => { setConversationId(null); greetedRef.current = false; setMessages([{ id: uid(), role: "assistant", content: "Yeni sohbet açtım 😄 Ne yapıyoruz patron?", typing: true, time: now() }]) }} title="Yeni sohbet">
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="5" y2="19" /><line x1="5" x2="19" y1="12" y2="12" /></svg>
-                    </motion.button>
+                    <div className="cs-metric-row">
+                      {INSIGHT_METRICS.map((metric) => (
+                        <div key={metric.label} className="cs-metric-card">
+                          <span className="cs-metric-label">{metric.label}</span>
+                          <strong>{metric.value}</strong>
+                          <p>{metric.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-                    <motion.button className="patron-header-btn danger" whileHover={isTouch ? {} : { scale: 1.08 }} whileTap={{ scale: 0.92 }} onClick={() => router.push("/login")} title="Çıkış">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                    </motion.button>
-                </div>
-            </motion.div>
+                  <motion.div
+                    className="cs-bot-panel"
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.12, duration: 0.45 }}
+                  >
+                    <div className="cs-bot-greeting">
+                      <span>Hızlı not</span>
+                      <strong>{voiceMeta.title}</strong>
+                    </div>
 
-            {/* ── CHAT AREA ── */}
-            <div ref={chatAreaRef} className="patron-chat-area" style={{ paddingBottom: kbVisible ? 140 : 250 }}>
-                {/* Quick Prompts */}
-                {showQuickPrompts && (
-                    <motion.div className="quick-prompts" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-                        {QUICK_PROMPTS.map((p, i) => (
-                            <motion.button key={i} className="quick-prompt-card" whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} onClick={() => sendMessage(p.q)}>
-                                <span className="quick-prompt-icon">{p.icon}</span>
-                                <span className="quick-prompt-title">{p.title}</span>
-                                <span className="quick-prompt-desc">{p.desc}</span>
-                            </motion.button>
-                        ))}
+                    <motion.div
+                      className="cs-bot-figure"
+                      animate={{ y: [0, -10, 0], rotate: [0, 1.2, -1.2, 0] }}
+                      transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut" }}
+                    >
+                      <div className="cs-bot-head">
+                        <div className="cs-bot-face">
+                          <span className="cs-bot-eye" />
+                          <span className="cs-bot-eye" />
+                          <span className="cs-bot-mouth" />
+                        </div>
+                      </div>
+                      <div className="cs-bot-body" />
+                      <div className="cs-bot-arm left" />
+                      <div className="cs-bot-arm right" />
                     </motion.div>
-                )}
 
-                <AnimatePresence initial={false}>
-                    {messages.map((m) => (
-                        <ChatBubble key={m.id} msg={m} onCopy={copyText} />
+                    <div className="cs-bot-summary">
+                      <div>
+                        <span className="cs-bot-summary-label">Sesli stüdyo</span>
+                        <strong>{voiceMeta.title}</strong>
+                      </div>
+                      <p>{voiceMeta.detail}</p>
+                    </div>
+                  </motion.div>
+
+                  <div className="cs-card-grid">
+                    {FEATURE_CARDS.map((card) => (
+                      <motion.button
+                        key={card.title}
+                        type="button"
+                        className="cs-feature-card"
+                        data-tone={card.tone}
+                        whileHover={{ y: -6 }}
+                        whileTap={{ scale: 0.985 }}
+                        onClick={() => void submitPrompt(card.prompt)}
+                      >
+                        <div className="cs-feature-icon">
+                          <Icon name={card.icon} />
+                        </div>
+                        <span className="cs-feature-kicker">{card.kicker}</span>
+                        <strong>{card.title}</strong>
+                        <p>{card.body}</p>
+                      </motion.button>
                     ))}
-                </AnimatePresence>
+                  </div>
+                </motion.section>
+              )}
+            </AnimatePresence>
+
+            <section className="cs-thread-panel">
+              <div className="cs-thread-header">
+                <div>
+                  <span className="cs-panel-kicker">Live workspace</span>
+                  <h2>Komut akışı</h2>
+                </div>
+
+                <div className="cs-chip-row">
+                  {QUICK_ACTIONS.map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      className="cs-action-chip"
+                      onClick={() => void submitPrompt(action.prompt)}
+                    >
+                      <Icon name={action.icon} />
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!showcaseVisible && latestAssistantMessage && (
+                <motion.div
+                  className="cs-compact-summary"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  <div>
+                    <span className="cs-panel-kicker">Son AI notu</span>
+                    <p>{latestAssistantMessage.content}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="cs-secondary-button compact"
+                    onClick={openVoiceStudio}
+                  >
+                    <Icon name="mic" />
+                    Sesli devam et
+                  </button>
+                </motion.div>
+              )}
+
+              <div
+                className="cs-message-scroll"
+                style={{ paddingBottom: 36 }}
+              >
+                {messages.map((message) => (
+                  <ChatBubble key={message.id} msg={message} onCopy={copyText} />
+                ))}
 
                 {sending && (
-                    <motion.div className="patron-bubble patron-bubble-bot" style={{ padding: "14px 16px" }} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                        <ThinkingDots />
-                    </motion.div>
+                  <motion.div
+                    className="cs-message cs-message-assistant"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <ThinkingLoader />
+                  </motion.div>
                 )}
 
                 {lastError && (
-                    <motion.div className="patron-bubble-error" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>⚠️ {lastError}</motion.div>
+                  <motion.div
+                    className="cs-inline-alert"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    {lastError}
+                  </motion.div>
                 )}
 
-                <div ref={chatEndRef} style={{ height: 1, flexShrink: 0 }} />
-            </div>
+                <div ref={chatEndRef} />
+              </div>
+            </section>
+          </main>
 
-            {/* ── BOTTOM ── */}
-            <div className="patron-bottom-area">
-                <div className="prompt-card">
-                    <div className="prompt-card-header">Soru veya İstek</div>
-                    <textarea
-                        ref={inputRef}
-                        className="prompt-textarea"
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder="Neye ihtiyacın var?"
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault()
-                                const q = text; setText(""); sendMessage(q)
-                                if (isTouch) inputRef.current?.blur()
-                            }
-                        }}
-                    />
-                    <div className="prompt-actions">
-                        <button className="action-pill" onClick={() => { if (!text.trim()) return; const q = text; setText(""); sendMessage(q); if (isTouch) inputRef.current?.blur() }} style={{ opacity: text.trim() ? 1 : 0.4 }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" x2="11" y1="2" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                            Gönder
-                        </button>
+          <div className={`cs-composer-dock ${keyboardRaised ? "is-raised" : ""} ${voicePanelVisible ? "has-voice" : ""}`}>
+            <AnimatePresence>
+              {voicePanelVisible && (
+                <motion.div
+                  className="cs-voice-panel"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                >
+                  <div className="cs-voice-panel-head">
+                    <div>
+                      <span className="cs-panel-kicker">Voice studio</span>
+                      <h3>{voiceMeta.title}</h3>
                     </div>
-                </div>
+                    <button
+                      type="button"
+                      className="cs-icon-button"
+                      onClick={closeVoiceStudio}
+                    >
+                      <Icon name="close" />
+                    </button>
+                  </div>
 
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginTop: 20 }}>
-                    <AnimatePresence>
-                        {(voiceState !== "idle" || !!voiceText) && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: 10 }}
-                                className="w-full max-w-[500px] px-4 py-3 rounded-2xl glass-strong border border-white/10 text-center mb-2"
-                            >
-                                <div className="text-[11px] uppercase tracking-widest text-[#00f0ff] mb-1 font-semibold">
-                                    {voiceState === "listening" && "🎙️ Dinliyorum..."}
-                                    {voiceState === "thinking" && "🧠 Düşünüyorum..."}
-                                    {voiceState === "speaking" && "🔊 Konuşuyorum..."}
-                                    {voiceState === "done" && "✅ Hazır"}
-                                </div>
-                                {voiceText && (
-                                    <div className="text-[13px] text-white/70 italic line-clamp-1 mt-0.5">
-                                        "{voiceText}"
-                                    </div>
-                                )}
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-
+                  <div className="cs-voice-panel-body">
                     <AIThinking
-                        size={64}
-                        isActive={voiceState === "listening" || voiceState === "speaking" || voiceState === "thinking"}
-                        onActivate={() => { setHandsfree(true); startListening() }}
+                      size={92}
+                      isActive={voicePanelVisible}
+                      state={voiceState}
+                      transcript={voiceText}
+                      onActivate={openVoiceStudio}
+                      onStop={closeVoiceStudio}
                     />
-                </div>
-            </div>
 
-            {/* ── SIDEBAR ── */}
-            <AnimatePresence>
-                {sidebarOpen && (
-                    <>
-                        <motion.div className="sidebar-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSidebarOpen(false)} />
-                        <motion.div className="sidebar" initial={{ x: -320 }} animate={{ x: 0 }} exit={{ x: -320 }} transition={{ type: "spring", damping: 25, stiffness: 400 }}>
-                            <div className="sidebar-header">
-                                <span className="sidebar-title">Sohbet Geçmişi</span>
-                                <motion.button className="patron-header-btn" whileTap={{ scale: 0.9 }} onClick={() => setSidebarOpen(false)} style={{ width: 32, height: 32 }}>
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" x2="6" y1="6" y2="18" /><line x1="6" x2="18" y1="6" y2="18" /></svg>
-                                </motion.button>
-                            </div>
+                    <div className="cs-voice-details">
+                      <p>{voiceMeta.detail}</p>
 
-                            <div style={{ padding: "12px 14px" }}>
-                                <motion.button className="btn-primary" style={{ width: "100%", fontSize: 13 }} whileTap={{ scale: 0.97 }} onClick={() => {
-                                    setConversationId(null); greetedRef.current = false; setSidebarOpen(false)
-                                    setMessages([{ id: uid(), role: "assistant", content: "Yeni sohbet açtım 😄 Ne yapıyoruz patron?", typing: true, time: now() }])
-                                }}>
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" x2="12" y1="5" y2="19" /><line x1="5" x2="19" y1="12" y2="12" /></svg>
-                                    Yeni Sohbet
-                                </motion.button>
-                            </div>
+                      <div className="cs-voice-toggles">
+                        <ToggleRow
+                          label="Cevapları sesli oku"
+                          value={autoSpeak}
+                          onChange={setAutoSpeak}
+                        />
+                        <ToggleRow
+                          label="Dinleme bitince otomatik gönder"
+                          value={autoSendOnStop}
+                          onChange={setAutoSendOnStop}
+                        />
+                        <ToggleRow
+                          label="Eller serbest modu"
+                          value={handsfree}
+                          onChange={setHandsfree}
+                        />
+                      </div>
 
-                            <div className="sidebar-list">
-                                {chatHistory.map((ch) => (
-                                    <motion.button key={ch.id} className={`sidebar-item ${conversationId === ch.id ? "active" : ""}`} whileTap={{ scale: 0.97 }} onClick={() => { setSidebarOpen(false) }}>
-                                        <span className="sidebar-item-title">{ch.title}</span>
-                                        <span className="sidebar-item-sub">{ch.lastMessage} • {ch.time}</span>
-                                    </motion.button>
-                                ))}
-                            </div>
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
+                      <div className="cs-voice-transcript">
+                        {voiceText ? voiceText : "Canlı transkript burada görünecek."}
+                      </div>
 
+                      <div className="cs-voice-actions">
+                        <button
+                          type="button"
+                          className="cs-secondary-button compact"
+                          onClick={() => {
+                            if (voiceState === "listening") {
+                              stopListening(false)
+                              return
+                            }
 
-            {/* Toast */}
-            <AnimatePresence>
-                {toast && (
-                    <motion.div className="toast" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}>
-                        {toast}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    )
-}
+                            if (!voiceOpen) {
+                              openVoiceStudio()
+                              return
+                            }
 
-// ─────────────────────────────────────────────
-// CHAT BUBBLE with actions
-// ─────────────────────────────────────────────
-function ChatBubble({ msg, onCopy }: { msg: Msg; onCopy: (t: string) => void }) {
-    const isBot = msg.role === "assistant"
-    const { displayed, done } = useTypingEffect(msg.content, 16, isBot && !!msg.typing)
-
-    return (
-        <motion.div
-            className={`patron-bubble ${isBot ? "patron-bubble-bot" : "patron-bubble-user"}`}
-            layout initial={{ opacity: 0, y: 15, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ type: "spring", stiffness: 450, damping: 28 }}
-        >
-            {isBot && (
-                <div className="patron-bot-avatar" style={{ overflow: "hidden", background: "white", padding: 2 }}>
-                    <img src="/eagle-logo.png" alt="Eagle" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                </div>
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ wordBreak: "break-word" as const }}>
-                    {isBot ? <MarkdownText text={displayed} /> : msg.content}
-                    {isBot && !done && (<motion.span style={{ color: "rgba(6,255,195,0.8)", fontWeight: 100, marginLeft: 1 }} animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.6, repeat: Infinity }}>|</motion.span>)}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    {msg.time && <span className="msg-timestamp">{msg.time}</span>}
-                    <div className="msg-actions">
-                        <button className="msg-action-btn" onClick={() => onCopy(msg.content)} title="Kopyala">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                            void startListening()
+                          }}
+                        >
+                          <Icon name="mic" />
+                          {voiceState === "listening" ? "Dinlemeyi durdur" : "Dinlemeyi başlat"}
                         </button>
+                        <button
+                          type="button"
+                          className="cs-primary-button compact"
+                          onClick={() => {
+                            if (voiceText.trim()) setText(voiceText.trim())
+                            closeVoiceStudio()
+                          }}
+                        >
+                          Metne aktar
+                          <Icon name="arrow-right" />
+                        </button>
+                      </div>
                     </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="cs-composer-card">
+              <div className="cs-composer-topline">
+                <span>Powered by Assistant v3.0</span>
+                <span>Kısa komutlar, ses ve bağlam hafızası aynı yüzeyde.</span>
+              </div>
+
+              <div className="cs-composer-shell">
+                <textarea
+                  ref={inputRef}
+                  className="cs-textarea"
+                  placeholder="Bir soru sor, görev tanımla ya da sesli akışı metne dönüştür..."
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault()
+                      const draft = text
+                      setText("")
+                      void submitPrompt(draft)
+                    }
+                  }}
+                />
+
+                <div className="cs-composer-bottom">
+                  <div className="cs-chip-row compact">
+                    {QUICK_ACTIONS.map((action) => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        className="cs-action-chip"
+                        onClick={() => void submitPrompt(action.prompt)}
+                      >
+                        <Icon name={action.icon} />
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="cs-composer-actions">
+                    <button type="button" className="cs-icon-button" onClick={openVoiceStudio}>
+                      <Icon name="mic" />
+                    </button>
+                    <button
+                      type="button"
+                      className="cs-primary-button compact"
+                      onClick={() => {
+                        const draft = text
+                        setText("")
+                        void submitPrompt(draft)
+                      }}
+                      disabled={!text.trim() || sending}
+                    >
+                      Gönder
+                      <Icon name="send" />
+                    </button>
+                  </div>
                 </div>
+              </div>
             </div>
-        </motion.div>
-    )
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {sidebarOpen && (
+            <>
+              <motion.button
+                type="button"
+                className="cs-drawer-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setSidebarOpen(false)}
+              />
+              <motion.aside
+                className="cs-drawer"
+                initial={{ x: -320 }}
+                animate={{ x: 0 }}
+                exit={{ x: -320 }}
+                transition={{ type: "spring", stiffness: 340, damping: 28 }}
+              >
+                <div className="cs-drawer-head">
+                  <div>
+                    <span className="cs-panel-kicker">Conversation memory</span>
+                    <h3>Sohbet geçmişi</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="cs-icon-button"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  className="cs-primary-button drawer"
+                  onClick={startNewConversation}
+                >
+                  Yeni sohbet başlat
+                  <Icon name="plus" />
+                </button>
+
+                <div className="cs-drawer-list">
+                  {chatHistory.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      className="cs-session-card"
+                      onClick={() => {
+                        setSidebarOpen(false)
+                        showToast("Bu demo sürümünde geçmiş oturum önizleme olarak tutuluyor.")
+                      }}
+                    >
+                      <strong>{session.title}</strong>
+                      <p>{session.lastMessage}</p>
+                      <span>{session.time}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.aside>
+            </>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              className="cs-toast"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 18 }}
+            >
+              {toast}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  )
 }
 
-// ─── Simple Markdown ───
+function BrandMark({
+  size,
+  className,
+}: {
+  size: number
+  className?: string
+}) {
+  return (
+    <span
+      className={className}
+      style={{ width: size, height: size }}
+    >
+      <Image
+        src="/eagle-logo.png"
+        alt="Eagle logo"
+        width={size}
+        height={size}
+        className="cs-brand-image"
+      />
+    </span>
+  )
+}
+
+function ChatBubble({ msg, onCopy }: { msg: Msg; onCopy: (value: string) => void }) {
+  const assistant = msg.role === "assistant"
+  const { displayed, done } = useTypingEffect(msg.content, assistant && Boolean(msg.typing))
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 18, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -10 }}
+      className={`cs-message ${assistant ? "cs-message-assistant" : "cs-message-user"}`}
+    >
+      {assistant && (
+        <div className="cs-message-avatar">
+          <BrandMark size={34} className="cs-message-avatar-mark" />
+        </div>
+      )}
+
+      <div className="cs-message-body">
+        <div className="cs-message-content">
+          {assistant ? <MarkdownText text={displayed} /> : msg.content}
+          {assistant && !done && <span className="cs-message-caret" />}
+        </div>
+        <div className="cs-message-meta">
+          {msg.time ? <span>{msg.time}</span> : null}
+          <button type="button" className="cs-copy-button" onClick={() => onCopy(msg.content)}>
+            <Icon name="copy" />
+            Kopyala
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
 function MarkdownText({ text }: { text: string }) {
-    const parts = text.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g)
-    return (
-        <>
-            {parts.map((part, i) => {
-                if (part.startsWith("```") && part.endsWith("```")) {
-                    const code = part.slice(3, -3).replace(/^\w+\n/, "")
-                    return <pre key={i} style={{ background: "rgba(0,0,0,0.2)", padding: "10px 12px", borderRadius: 10, fontSize: 12, overflow: "auto", margin: "6px 0", fontFamily: "var(--font-mono)" }}><code>{code}</code></pre>
-                }
-                if (part.startsWith("**") && part.endsWith("**")) {
-                    return <strong key={i}>{part.slice(2, -2)}</strong>
-                }
-                if (part.startsWith("`") && part.endsWith("`")) {
-                    return <code key={i} style={{ background: "rgba(124,58,237,0.15)", padding: "2px 6px", borderRadius: 5, fontSize: "0.85em", fontFamily: "var(--font-mono)" }}>{part.slice(1, -1)}</code>
-                }
-                return <span key={i}>{part}</span>
-            })}
-        </>
-    )
+  const parts = text.split(/(```[\s\S]*?```|\*\*.*?\*\*|`[^`]+`)/g)
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith("```") && part.endsWith("```")) {
+          const code = part.slice(3, -3).replace(/^\w+\n/, "")
+          return (
+            <pre key={index} className="cs-code-block">
+              <code>{code}</code>
+            </pre>
+          )
+        }
+
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={index}>{part.slice(2, -2)}</strong>
+        }
+
+        if (part.startsWith("`") && part.endsWith("`")) {
+          return (
+            <code key={index} className="cs-inline-code">
+              {part.slice(1, -1)}
+            </code>
+          )
+        }
+
+        return <span key={index}>{part}</span>
+      })}
+    </>
+  )
 }
 
-// ─── Subcomponents ───
-function ThinkingDots() {
-    return (
-        <div style={{ display: "flex", gap: 5, alignItems: "center", height: 18 }}>
-            {[0, 1, 2].map((i) => (<motion.div key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "rgba(255,255,255,0.45)" }} animate={{ y: [0, -7, 0], opacity: [0.35, 1, 0.35] }} transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />))}
-        </div>
-    )
+function ThinkingLoader() {
+  return (
+    <div className="cs-thinking">
+      {[0, 1, 2].map((item) => (
+        <motion.span
+          key={item}
+          animate={{ y: [0, -6, 0], opacity: [0.35, 1, 0.35] }}
+          transition={{
+            duration: 0.85,
+            repeat: Infinity,
+            delay: item * 0.12,
+            ease: "easeInOut",
+          }}
+        />
+      ))}
+    </div>
+  )
 }
 
-function VoiceOrb({ state }: { state: string }) {
-    const isActive = state === "listening" || state === "speaking" || state === "thinking"
-    const color = state === "listening" ? "rgba(6,255,195,0.7)" : state === "speaking" ? "rgba(0,180,255,0.7)" : state === "thinking" ? "rgba(255,200,0,0.7)" : "rgba(255,255,255,0.2)"
-    const glowColor = state === "listening" ? "0 0 50px rgba(6,255,195,0.3)" : state === "speaking" ? "0 0 50px rgba(0,180,255,0.3)" : state === "thinking" ? "0 0 50px rgba(255,200,0,0.2)" : "0 0 15px rgba(255,255,255,0.05)"
-
-    return (
-        <div style={{ position: "relative", width: 110, height: 110, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {isActive && [0, 1, 2].map((i) => (<motion.div key={i} style={{ position: "absolute", borderRadius: "50%", border: `1.5px solid ${color}` }} animate={{ width: [50, 110], height: [50, 110], opacity: [0.35, 0] }} transition={{ duration: 2, repeat: Infinity, delay: i * 0.6, ease: "easeOut" }} />))}
-            <motion.div style={{ width: 56, height: 56, borderRadius: "50%", background: `radial-gradient(circle at 35% 35%, ${color}, rgba(0,0,0,0.3))`, boxShadow: glowColor }} animate={isActive ? { scale: [1, 1.1, 0.95, 1.08, 1], borderRadius: ["50%", "46%", "50%", "48%", "50%"] } : { scale: 1 }} transition={{ duration: state === "speaking" ? 0.6 : 1.2, repeat: isActive ? Infinity : 0, ease: "easeInOut" }} />
-            {state === "listening" && (<div style={{ position: "absolute", display: "flex", gap: 2.5, alignItems: "center" }}>{[0, 1, 2, 3, 4].map((i) => (<motion.div key={i} style={{ width: 2.5, borderRadius: 99, background: "white" }} animate={{ height: [5, 20, 5] }} transition={{ duration: 0.5 + i * 0.04, repeat: Infinity, ease: "easeInOut", delay: i * 0.07 }} />))}</div>)}
-        </div>
-    )
+function ToggleRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: boolean
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <div className="cs-toggle-row">
+      <span>{label}</span>
+      <button
+        type="button"
+        className={`cs-toggle ${value ? "is-active" : ""}`}
+        onClick={() => onChange(!value)}
+        aria-pressed={value}
+      >
+        <motion.span
+          className="cs-toggle-thumb"
+          animate={{ x: value ? 20 : 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+        />
+      </button>
+    </div>
+  )
 }
 
-function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-    return (
-        <div className="patron-toggle-row">
-            <span style={{ fontSize: 12, opacity: 0.75, flex: 1, lineHeight: 1.3 }}>{label}</span>
-            <motion.button className={`patron-toggle ${value ? "active" : ""}`} onClick={() => onChange(!value)} whileTap={{ scale: 0.95 }}>
-                <motion.div className="patron-toggle-dot" animate={{ x: value ? 18 : 0 }} transition={{ type: "spring", stiffness: 500, damping: 30 }} />
-            </motion.button>
-        </div>
-    )
+function Icon({ name }: { name: IconName }) {
+  const props = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  }
+
+  switch (name) {
+    case "plus":
+      return <svg {...props}><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+    case "search":
+      return <svg {...props}><circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5" /></svg>
+    case "history":
+      return <svg {...props}><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /><path d="M12 7v5l3 2" /></svg>
+    case "mic":
+      return <svg {...props}><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 11v1a7 7 0 0 1-14 0v-1" /><path d="M12 19v3" /></svg>
+    case "spark":
+      return <svg {...props}><path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3Z" /><path d="m5 17 .9 2.1L8 20l-2.1.9L5 23l-.9-2.1L2 20l2.1-.9L5 17Z" /></svg>
+    case "layers":
+      return <svg {...props}><path d="m12 4 8 4-8 4-8-4 8-4Z" /><path d="m4 12 8 4 8-4" /><path d="m4 16 8 4 8-4" /></svg>
+    case "team":
+      return <svg {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" /><circle cx="9.5" cy="7" r="3" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 4.13a4 4 0 0 1 0 7.75" /></svg>
+    case "calendar":
+      return <svg {...props}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M16 3v4" /><path d="M8 3v4" /><path d="M3 11h18" /></svg>
+    case "wave":
+      return <svg {...props}><path d="M2 12c2.5 0 2.5-5 5-5s2.5 10 5 10 2.5-10 5-10 2.5 5 5 5" /></svg>
+    case "send":
+      return <svg {...props}><path d="m22 2-7 20-4-9-9-4 20-7Z" /></svg>
+    case "copy":
+      return <svg {...props}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+    case "sun":
+      return <svg {...props}><circle cx="12" cy="12" r="4" /><path d="M12 2v2.5" /><path d="M12 19.5V22" /><path d="m4.93 4.93 1.77 1.77" /><path d="m17.3 17.3 1.77 1.77" /><path d="M2 12h2.5" /><path d="M19.5 12H22" /><path d="m4.93 19.07 1.77-1.77" /><path d="m17.3 6.7 1.77-1.77" /></svg>
+    case "moon":
+      return <svg {...props}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" /></svg>
+    case "logout":
+      return <svg {...props}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>
+    case "menu":
+      return <svg {...props}><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></svg>
+    case "arrow-right":
+      return <svg {...props}><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+    case "chart":
+      return <svg {...props}><path d="M4 19h16" /><path d="M7 15V9" /><path d="M12 15V5" /><path d="M17 15v-3" /></svg>
+    case "close":
+      return <svg {...props}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+    case "badge":
+      return <svg {...props}><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.2 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>
+    case "planet":
+      return <svg {...props}><circle cx="12" cy="12" r="4.5" /><path d="M4 13c2.2 1.6 5 2.5 8 2.5 4.4 0 8.2-1.9 10-4.5" /><path d="M2 10c2-2.3 5.6-4 10-4 4.1 0 7.6 1.4 9.7 3.4" /></svg>
+    default:
+      return <svg {...props}><circle cx="12" cy="12" r="8" /></svg>
+  }
 }

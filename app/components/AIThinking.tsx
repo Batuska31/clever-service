@@ -1,173 +1,179 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import type { CSSProperties } from "react"
+import { motion } from "framer-motion"
+
+type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "done" | "error"
 
 interface AIThinkingProps {
-    onActivate?: () => void
-    isActive?: boolean
-    size?: number
+  onActivate?: () => void
+  onStop?: () => void
+  isActive?: boolean
+  size?: number
+  state?: VoiceState
+  transcript?: string
 }
 
-export function AIThinking({ onActivate, isActive: externalActive, size = 80 }: AIThinkingProps) {
-    const canvasRef = useRef<HTMLCanvasElement>(null)
-    const [internalActive, setInternalActive] = useState(false)
-    const isActive = externalActive || internalActive
-    const [taskText, setTaskText] = useState("AI is Thinking...")
+const STATE_META: Record<VoiceState, { label: string; helper: string; tone: string }> = {
+  idle: {
+    label: "Ready",
+    helper: "Tap the mic to start the holo listening layer.",
+    tone: "#4a90e2",
+  },
+  listening: {
+    label: "Listening",
+    helper: "Voice input is flowing through the holographic capture field.",
+    tone: "#ffc107",
+  },
+  thinking: {
+    label: "Thinking",
+    helper: "Command context is being resolved into an answer.",
+    tone: "#ff9b2f",
+  },
+  speaking: {
+    label: "Speaking",
+    helper: "Response is streaming back with voice playback enabled.",
+    tone: "#6ac7ff",
+  },
+  done: {
+    label: "Ready again",
+    helper: "You can restart listening or push the transcript into chat.",
+    tone: "#ffffff",
+  },
+  error: {
+    label: "Mic issue",
+    helper: "Check browser permissions and available audio input.",
+    tone: "#ff6b81",
+  },
+}
 
-    // Dynamic radius based on size
-    const orbRadius = size * 1.5;
+const WAVE_SHAPES: Record<VoiceState, [string, string, string]> = {
+  idle: [
+    "M0 110 C80 110 120 110 160 110 C220 110 260 110 320 110 C390 110 430 110 480 110 C540 110 590 110 640 110",
+    "M0 110 C80 110 120 108 160 110 C220 112 260 108 320 110 C390 112 430 108 480 110 C540 112 590 110 640 110",
+    "M0 110 C80 110 120 110 160 110 C220 110 260 110 320 110 C390 110 430 110 480 110 C540 110 590 110 640 110",
+  ],
+  listening: [
+    "M0 110 C60 110 100 176 148 176 C196 176 218 42 284 42 C350 42 374 174 442 174 C510 174 548 110 640 110",
+    "M0 110 C64 110 100 164 152 164 C204 164 222 56 286 56 C350 56 376 166 444 166 C512 166 552 110 640 110",
+    "M0 110 C60 110 96 182 150 182 C204 182 226 38 288 38 C350 38 380 178 446 178 C512 178 552 110 640 110",
+  ],
+  thinking: [
+    "M0 110 C58 110 100 150 156 150 C212 150 228 74 292 74 C356 74 376 146 444 146 C512 146 556 110 640 110",
+    "M0 110 C62 110 98 144 154 144 C210 144 232 82 296 82 C360 82 382 142 448 142 C514 142 554 110 640 110",
+    "M0 110 C58 110 96 154 156 154 C216 154 230 68 294 68 C358 68 382 150 448 150 C514 150 556 110 640 110",
+  ],
+  speaking: [
+    "M0 110 C60 110 104 160 150 160 C196 160 226 60 286 60 C346 60 378 156 444 156 C510 156 548 94 640 94",
+    "M0 110 C64 110 104 144 156 144 C208 144 230 78 292 78 C354 78 382 152 446 152 C510 152 548 98 640 98",
+    "M0 110 C60 110 102 168 154 168 C206 168 230 54 288 54 C346 54 380 164 444 164 C508 164 548 92 640 92",
+  ],
+  done: [
+    "M0 110 C80 110 120 108 160 110 C220 112 260 108 320 110 C390 112 430 108 480 110 C540 112 590 110 640 110",
+    "M0 110 C80 110 120 106 160 110 C220 114 260 106 320 110 C390 114 430 106 480 110 C540 114 590 110 640 110",
+    "M0 110 C80 110 120 108 160 110 C220 112 260 108 320 110 C390 112 430 108 480 110 C540 112 590 110 640 110",
+  ],
+  error: [
+    "M0 110 C72 110 112 132 162 132 C212 132 246 88 298 88 C350 88 388 134 448 134 C508 134 552 110 640 110",
+    "M0 110 C72 110 110 126 162 126 C214 126 244 94 298 94 C352 94 390 128 448 128 C506 128 552 110 640 110",
+    "M0 110 C72 110 112 132 162 132 C212 132 246 88 298 88 C350 88 388 134 448 134 C508 134 552 110 640 110",
+  ],
+}
 
-    useEffect(() => {
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const ctx = canvas.getContext("2d")
-        if (!ctx) return
+export function AIThinking({
+  onActivate,
+  onStop,
+  isActive = false,
+  size = 92,
+  state = "idle",
+  transcript = "",
+}: AIThinkingProps) {
+  const active = isActive || state !== "idle"
+  const meta = STATE_META[state]
+  const waves = WAVE_SHAPES[state]
 
-        let animationFrameId: number
-        const particles: Particle[] = []
-        const particleCount = 300
-
-        class Particle {
-            phi: number; theta: number; radius: number
-            x: number; y: number; z: number
-            size: number; speed: number; pulse: number
-            renderX: number = 0; renderY: number = 0; renderZ: number = 0
-            renderSize: number = 0; opacity: number = 0
-
-            constructor() {
-                this.phi = Math.random() * Math.PI * 2
-                this.theta = Math.acos((Math.random() * 2) - 1)
-                this.radius = orbRadius
-                this.x = this.y = this.z = 0
-                this.size = Math.random() * 1.5 + 0.5
-                this.speed = Math.random() * 0.01 + 0.005
-                this.pulse = Math.random() * Math.PI * 2
-            }
-
-            update() {
-                this.phi += this.speed
-                this.pulse += 0.05
-                this.x = this.radius * Math.sin(this.theta) * Math.cos(this.phi)
-                this.y = this.radius * Math.sin(this.theta) * Math.sin(this.phi)
-                this.z = this.radius * Math.cos(this.theta)
-                const perspective = 800 / (800 + this.z)
-                this.renderX = (this.x * perspective) + 400
-                this.renderY = (this.y * perspective) + 400
-                this.renderSize = this.size * perspective
-                this.opacity = (perspective - 0.5) * 2
-            }
-
-            draw(ctx: CanvasRenderingContext2D) {
-                const glow = Math.sin(this.pulse) * 0.5 + 0.5
-                ctx.beginPath()
-                ctx.arc(this.renderX, this.renderY, this.renderSize, 0, Math.PI * 2)
-                ctx.fillStyle = `rgba(255, 193, 7, ${this.opacity * (0.3 + glow * 0.7)})`
-                ctx.fill()
-            }
-        }
-
-        for (let i = 0; i < particleCount; i++) particles.push(new Particle())
-
-        const animate = () => {
-            ctx.clearRect(0, 0, 800, 800)
-            if (isActive) {
-                particles.sort((a, b) => b.z - a.z)
-                particles.forEach(p => {
-                    p.update()
-                    p.draw(ctx)
-                })
-            }
-            animationFrameId = requestAnimationFrame(animate)
-        }
-
-        animate()
-        return () => cancelAnimationFrame(animationFrameId)
-    }, [isActive, orbRadius])
-
-    useEffect(() => {
-        if (!isActive) return
-        const tasks = ["Analyzing context...", "Optimizing response...", "Searching logic..."]
-        let idx = 0
-        const interval = setInterval(() => {
-            idx = (idx + 1) % tasks.length
-            setTaskText(tasks[idx])
-        }, 3000)
-        return () => clearInterval(interval)
-    }, [isActive])
-
-    const handleActivate = () => {
-        if (!isActive) {
-            setInternalActive(true)
-            onActivate?.()
-        }
-    }
-
-    return (
-        <div
-            className="relative flex items-center justify-center transition-all duration-500"
-            style={{
-                width: isActive ? '120px' : `${size}px`,
-                height: isActive ? '120px' : `${size}px`
+  return (
+    <div
+      className={`ai-voice ai-voice-${state}`}
+      style={{ "--voice-size": `${size}px`, "--voice-tone": meta.tone } as CSSProperties}
+    >
+      <div className="ai-voice-console">
+        <div className="ai-voice-console-top">
+          <div className="ai-voice-badge">
+            <span className="ai-voice-badge-dot" />
+            {meta.label}
+          </div>
+          <button
+            type="button"
+            className="ai-voice-console-button"
+            onClick={() => {
+              if (active) onStop?.()
+              else onActivate?.()
             }}
-        >
-            {/* Iridescent Mic Button */}
-            {!isActive && (
-                <button
-                    onClick={handleActivate}
-                    className="absolute z-20 rounded-full flex items-center justify-center transition-all duration-700 cursor-pointer shadow-lg animate-float-slow group"
-                    style={{
-                        width: '100%',
-                        height: '100%',
-                        background: 'linear-gradient(135deg, #1A237E 0%, #0E1171 50%, #FFC107 100%)',
-                        boxShadow: '0 10px 25px rgba(14, 17, 113, 0.4), inset 0 2px 10px rgba(255, 255, 255, 0.2)'
-                    }}
-                >
-                    <div className="absolute inset-[-3px] rounded-full bg-gradient-to-r from-[#1A237E] via-[#0E1171] to-[#FFC107] opacity-20 blur-lg group-hover:opacity-40 transition-opacity" />
-                    <svg
-                        className="fill-white drop-shadow-sm"
-                        style={{ width: '40%', height: '40%' }}
-                        viewBox="0 0 24 24"
-                    >
-                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-                    </svg>
-                </button>
-            )}
-
-            <canvas
-                ref={canvasRef}
-                width={800}
-                height={800}
-                className={`absolute inset-0 w-full h-full transition-opacity duration-1000 ${isActive ? 'opacity-100' : 'opacity-0'}`}
-                style={{
-                    transform: 'scale(1.2)'
-                }}
-            />
-
-            {isActive && (
-                <div className="absolute bottom-6 text-center pointer-events-none w-full z-10">
-                    <div className="text-[14px] font-medium tracking-[0.1em] uppercase text-[#FFC107] animate-pulse-glow" style={{ textShadow: '0 0 10px rgba(255, 193, 7, 0.4)' }}>
-                        {taskText}
-                    </div>
-                </div>
-            )}
-
-            <style jsx>{`
-                @keyframes float-slow {
-                    0%, 100% { transform: translateY(0); }
-                    50% { transform: translateY(-10px); }
-                }
-                .animate-float-slow {
-                    animation: float-slow 4s ease-in-out infinite;
-                }
-                .animate-pulse-glow {
-                    animation: pulse-glow 2s ease-in-out infinite;
-                }
-                @keyframes pulse-glow {
-                    0%, 100% { opacity: 0.6; }
-                    50% { opacity: 1; }
-                }
-            `}</style>
+          >
+            {active ? "Stop" : "Start"}
+          </button>
         </div>
-    )
+
+        <div className="ai-voice-wavefield">
+          <motion.div
+            className="ai-voice-scan"
+            animate={{ x: ["-10%", "110%"] }}
+            transition={{ duration: active ? 2.2 : 3.8, repeat: Infinity, ease: "linear" }}
+          />
+
+          <svg className="ai-voice-svg glow" viewBox="0 0 640 220" aria-hidden="true">
+            <motion.path
+              d={waves[0]}
+              animate={{ d: waves }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+            />
+          </svg>
+          <svg className="ai-voice-svg cyan" viewBox="0 0 640 220" aria-hidden="true">
+            <motion.path
+              d={waves[1]}
+              animate={{ d: [waves[1], waves[2], waves[0], waves[1]] }}
+              transition={{ duration: 2.7, repeat: Infinity, ease: "easeInOut" }}
+            />
+          </svg>
+          <svg className="ai-voice-svg white" viewBox="0 0 640 220" aria-hidden="true">
+            <motion.path
+              d={waves[2]}
+              animate={{ d: [waves[2], waves[0], waves[1], waves[2]] }}
+              transition={{ duration: 2.1, repeat: Infinity, ease: "easeInOut" }}
+            />
+          </svg>
+
+          <div className="ai-voice-core">
+            <motion.div
+              className="ai-voice-core-ring"
+              animate={{ scale: active ? [1, 1.12, 1] : 1, opacity: active ? [0.45, 0.9, 0.45] : 0.35 }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <div className="ai-voice-core-dot">
+              <svg
+                className="ai-voice-mic"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                <path d="M12 19v3" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div className="ai-voice-console-bottom">
+          <span>{meta.helper}</span>
+          <p>{transcript || "Voice transcript will appear here while the holo field is active."}</p>
+        </div>
+      </div>
+    </div>
+  )
 }

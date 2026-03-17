@@ -1,154 +1,122 @@
 "use client"
 
 import {
-    createContext,
-    useContext,
-    useEffect,
-    useState,
-    useCallback,
-    type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
 } from "react"
-import { supabase } from "@/lib/supabase"
 import type { Session, User } from "@supabase/supabase-js"
+import { supabase } from "@/lib/supabase"
 
-// ─── Types ───
 interface AuthState {
-    loading: boolean
-    isLoggedIn: boolean
-    userId: string | null
-    email: string | null
-    role: string | null
-    tenantId: string | null
-    fullName: string | null
-    user: User | null
-    session: Session | null
+  loading: boolean
+  isLoggedIn: boolean
+  userId: string | null
+  email: string | null
+  role: string | null
+  tenantId: string | null
+  fullName: string | null
+  user: User | null
+  session: Session | null
 }
 
 interface AuthCtx extends AuthState {
-    signIn: (email: string, password: string) => Promise<{ error: string | null }>
-    signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>
-    signOut: () => Promise<void>
-    refreshProfile: () => Promise<void>
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>
+  signOut: () => Promise<void>
+  refreshProfile: () => Promise<void>
 }
 
 const defaultState: AuthState = {
-    loading: true,
-    isLoggedIn: false,
-    userId: null,
-    email: null,
-    role: null,
-    tenantId: null,
-    fullName: null,
-    user: null,
-    session: null,
+  loading: true,
+  isLoggedIn: false,
+  userId: null,
+  email: null,
+  role: null,
+  tenantId: null,
+  fullName: null,
+  user: null,
+  session: null,
+}
+
+const devState: AuthState = {
+  loading: false,
+  isLoggedIn: true,
+  userId: "dev_user_123",
+  email: "dev@cleverservice.ai",
+  role: "admin",
+  tenantId: "dev_tenant_123",
+  fullName: "Dev Patron",
+  user: null,
+  session: null,
 }
 
 const AuthContext = createContext<AuthCtx>({
-    ...defaultState,
-    signIn: async () => ({ error: null }),
-    signUp: async () => ({ error: null }),
-    signOut: async () => { },
-    refreshProfile: async () => { },
+  ...defaultState,
+  signIn: async () => ({ error: null }),
+  signUp: async () => ({ error: null }),
+  signOut: async () => {},
+  refreshProfile: async () => {},
 })
 
-// ─── Provider ───
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [state, setState] = useState<AuthState>(defaultState)
+  const [state, setState] = useState<AuthState>(devState)
 
-    const fetchProfile = useCallback(async (userId: string) => {
-        try {
-            const { data, error } = await supabase
-                .from("profiles")
-                .select("tenant_id, role, full_name")
-                .eq("id", userId)
-                .single()
+  const fetchProfile = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("tenant_id, role, full_name")
+        .eq("id", userId)
+        .single()
 
-            if (error) throw error
-            return {
-                tenantId: data?.tenant_id ?? null,
-                role: data?.role ?? null,
-                fullName: data?.full_name ?? null,
-            }
-        } catch {
-            return { tenantId: null, role: null, fullName: null }
-        }
-    }, [])
+      if (error) throw error
 
-    const syncUser = useCallback(
-        async (session: Session | null) => {
-            if (!session?.user) {
-                setState({ ...defaultState, loading: false })
-                return
-            }
-            const u = session.user
-            const profile = await fetchProfile(u.id)
-
-            setState({
-                loading: false,
-                isLoggedIn: true,
-                userId: u.id,
-                email: u.email ?? null,
-                role: profile.role,
-                tenantId: profile.tenantId,
-                fullName: profile.fullName,
-                user: u,
-                session,
-            })
-        },
-        [fetchProfile]
-    )
-
-    // Init + listen (DEV BYPASS)
-    useEffect(() => {
-        // Mock a logged-in user session immediately
-        setState({
-            loading: false,
-            isLoggedIn: true,
-            userId: "dev_user_123",
-            email: "dev@cleverservice.ai",
-            role: "admin",
-            tenantId: "dev_tenant_123",
-            fullName: "Dev Patron",
-            user: { id: "dev_user_123", email: "dev@cleverservice.ai" } as any,
-            session: {} as any,
-        })
-    }, [])
-
-    // Actions
-    const signIn = async (email: string, password: string) => {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        return { error: error?.message ?? null }
+      return {
+        tenantId: data?.tenant_id ?? null,
+        role: data?.role ?? null,
+        fullName: data?.full_name ?? null,
+      }
+    } catch {
+      return { tenantId: null, role: null, fullName: null }
     }
+  }, [])
 
-    const signUp = async (email: string, password: string, fullName: string) => {
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { full_name: fullName } },
-        })
-        return { error: error?.message ?? null }
-    }
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    return { error: error?.message ?? null }
+  }
 
-    const signOut = async () => {
-        await supabase.auth.signOut()
-        setState({ ...defaultState, loading: false })
-    }
+  const signUp = async (email: string, password: string, fullName: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    })
 
-    const refreshProfile = async () => {
-        if (!state.userId) return
-        const profile = await fetchProfile(state.userId)
-        setState((prev) => ({ ...prev, ...profile }))
-    }
+    return { error: error?.message ?? null }
+  }
 
-    return (
-        <AuthContext.Provider
-            value={{ ...state, signIn, signUp, signOut, refreshProfile }}
-        >
-            {children}
-        </AuthContext.Provider>
-    )
+  const signOut = async () => {
+    await supabase.auth.signOut()
+    setState({ ...defaultState, loading: false })
+  }
+
+  const refreshProfile = async () => {
+    if (!state.userId) return
+    const profile = await fetchProfile(state.userId)
+    setState((current) => ({ ...current, ...profile }))
+  }
+
+  return (
+    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refreshProfile }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {
-    return useContext(AuthContext)
+  return useContext(AuthContext)
 }

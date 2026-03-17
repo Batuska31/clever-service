@@ -1,31 +1,34 @@
 import type { Metadata } from "next"
+import { Manrope, Sora } from "next/font/google"
 import { AuthProvider } from "@/lib/auth-store"
 import { ThemeProvider } from "@/lib/theme-provider"
 import { BackgroundEffects } from "./components/BackgroundEffects"
 import "./globals.css"
 
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+  weight: ["400", "500", "600", "700", "800"],
+})
+
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-sora",
+  weight: ["400", "500", "600", "700", "800"],
+})
+
 export const metadata: Metadata = {
-  title: "Clever Service — Kurumsal AI Asistan",
-  description: "E-ticaret ve kurumsal operasyonlar için AI destekli akıllı yönetim platformu",
+  title: "Clever Service - AI Command Studio",
+  description: "Kurumsal operasyonlar icin tasarlanmis modern AI komut ve iletisim arayuzu.",
 }
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   return (
-    <html lang="tr" className="dark" data-theme="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#04040c" />
-      </head>
+    <html lang="tr" className={`${manrope.variable} ${sora.variable} dark`} data-theme="dark">
       <body>
         <BackgroundEffects />
         <ThemeProvider>
